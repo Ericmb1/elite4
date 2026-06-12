@@ -310,15 +310,33 @@ function makePoke(p) {
     isLegendary:p.isLegendary, isShiny };
 }
 
+// Eevee (#133) can branch into any of its evolutions, so the player picks.
+const EEVEE_DEX = 133;
+const EEVEELUTIONS = [134,135,136,196,197,470,471]; // Vaporeon..Glaceon
+
+// Build an evolution object for a given target dex, inheriting shiny state.
+function buildEvo(dexNum, from) {
+  const e = DEX_MAP[dexNum]; if (!e) return null;
+  const baseBst = e[1]+e[2]+e[3]+e[4]+e[5]+e[6];
+  const bst = from.isShiny ? Math.round(baseBst*1.2) : baseBst;
+  const poolEvo = POOL.find(p=>p.dex===dexNum);
+  return { name:e[0], dex:e[7], types:[e[8],e[9]].filter(Boolean),
+    bst, baseBst, tier:poolEvo?poolEvo.tier:from.tier, gen:dexToGen(e[7]),
+    evolvesTo:e[10]!=null?e[10]:null, isLegendary:LEGENDARY_DEX.has(e[7]), isShiny:from.isShiny };
+}
+
 function getEvolution(poke) {
   if (!poke.evolvesTo) return null;
-  const e = DEX_MAP[poke.evolvesTo]; if (!e) return null;
-  const baseBst = e[1]+e[2]+e[3]+e[4]+e[5]+e[6];
-  const bst = poke.isShiny ? Math.round(baseBst*1.2) : baseBst;
-  const poolEvo = POOL.find(p=>p.dex===poke.evolvesTo);
-  return { name:e[0], dex:e[7], types:[e[8],e[9]].filter(Boolean),
-    bst, baseBst, tier:poolEvo?poolEvo.tier:poke.tier, gen:dexToGen(e[7]),
-    evolvesTo:e[10]!=null?e[10]:null, isLegendary:LEGENDARY_DEX.has(e[7]), isShiny:poke.isShiny };
+  return buildEvo(poke.evolvesTo, poke);
+}
+
+// Returns the list of choosable evolutions for a Pokémon (Eevee branches).
+function getEvolutionChoices(poke) {
+  if (poke.dex === EEVEE_DEX) {
+    return EEVEELUTIONS.map(d => buildEvo(d, poke)).filter(Boolean);
+  }
+  const evo = getEvolution(poke);
+  return evo ? [evo] : [];
 }
 
 function simulateRun(team) {
@@ -583,11 +601,23 @@ export default function App() {
   const chiptuneRef = useRef(null);
 
   // Lazily create the engine and toggle playback. Off by default; the first
-  // toggle is the user gesture that unlocks the Web Audio context.
+  // toggle is the user gesture that unlocks the Web Audio context. We flip the
+  // UI state immediately and let the (async) context resume happen in the
+  // background so the button never appears stuck.
   function toggleMusic() {
-    if (!chiptuneRef.current) chiptuneRef.current = new Chiptune();
-    if (musicOn) { chiptuneRef.current.stop(); setMusicOn(false); }
-    else { chiptuneRef.current.start(); setMusicOn(true); }
+    try {
+      if (!chiptuneRef.current) chiptuneRef.current = new Chiptune();
+      if (chiptuneRef.current.isPlaying) {
+        chiptuneRef.current.stop();
+        setMusicOn(false);
+      } else {
+        chiptuneRef.current.start();
+        setMusicOn(true);
+      }
+    } catch (e) {
+      console.error('[v0] music toggle failed', e);
+      setMusicOn(false);
+    }
   }
 
   // Stop audio if the component unmounts.
@@ -776,15 +806,19 @@ export default function App() {
     const newTeam = [...team, current];
     const newEx = new Set([...excluded, current.name]);
     setTeam(newTeam); setExcluded(newEx);
-    const evo = !usedEvo ? getEvolution(current) : null;
-    if (evo) {
-      setEvoPhase({ offer:true, poke:current, evo, newTeam, newEx });
+    const choices = !usedEvo ? getEvolutionChoices(current) : [];
+    if (choices.length) {
+      // Default to the first option; Eevee shows a multi-way picker.
+      setEvoPhase({ offer:true, poke:current, evo:choices[0], choices, newTeam, newEx });
     } else {
       setRollNum(r=>r+1); queueNext(newTeam, newEx);
     }
   }
 
-  function acceptEvo() { setEvoPhase(p=>({...p, offer:false, animating:true})); }
+  // Accept the (optionally chosen) evolution and kick off the animation.
+  function acceptEvo(chosen) {
+    setEvoPhase(p=>({ ...p, evo:chosen||p.evo, offer:false, animating:true }));
+  }
 
   function skipEvo() {
     const { newTeam, newEx } = evoPhase;
@@ -920,6 +954,7 @@ export default function App() {
   // ── HOME ──────────────────────────────────────────────────
   if (authScreen==='game' && screen==='home') return (
     <div style={sWrap}>
+      {musicToggle}
       {toast.length>0&&<AchievementToast achievements={toast} onDismiss={()=>setToast([])}/>}
       <div style={sCard}>
         <div style={sH1}>ELITE FOUR</div>
@@ -1103,6 +1138,7 @@ export default function App() {
     ];
     return (
       <div style={sWrap}>
+        {musicToggle}
         {toast.length>0&&<AchievementToast achievements={toast} onDismiss={()=>setToast([])}/>}
         <div style={sCard}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
@@ -1126,16 +1162,36 @@ export default function App() {
           {evoPhase&&evoPhase.offer&&(
             <div style={{ background:GB.darkest, border:`2px solid ${GB.accent}`, padding:12, textAlign:'center', marginBottom:8 }}>
               <div style={{ color:GB.accent, fontSize:11, fontWeight:'bold', marginBottom:8 }}>★ EVOLVE AVAILABLE</div>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:12, marginBottom:8 }}>
-                <div style={{ textAlign:'center' }}><PokeCard poke={evoPhase.poke} size={64}/><div style={{ color:GB.textDim, fontSize:9, marginTop:2 }}>{evoPhase.poke.name}</div></div>
-                <span style={{ color:GB.accent, fontSize:18 }}>→</span>
-                <div style={{ textAlign:'center' }}><PokeCard poke={evoPhase.evo} size={64}/><div style={{ color:GB.text, fontSize:9, fontWeight:'bold', marginTop:2 }}>{evoPhase.evo.name}</div></div>
-              </div>
-              <div style={{ color:GB.accent, fontSize:10, marginBottom:8 }}>BST +{evoPhase.evo.bst-evoPhase.poke.bst}</div>
-              <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
-                <button style={{...sBtnSm, background:GB.accent, color:GB.darkest}} onClick={acceptEvo}>EVOLVE ★</button>
-                <button style={sBtnSm} onClick={skipEvo}>SKIP →</button>
-              </div>
+              {evoPhase.choices&&evoPhase.choices.length>1 ? (
+                <>
+                  <div style={{ color:GB.text, fontSize:10, marginBottom:8 }}>Choose {evoPhase.poke.name}&apos;s evolution:</div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginBottom:10 }}>
+                    {evoPhase.choices.map(c=>(
+                      <button key={c.dex} onClick={()=>acceptEvo(c)}
+                        style={{ background:GB.dark, border:`2px solid ${GB.mid}`, padding:'4px 2px', cursor:'pointer',
+                          display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
+                        <PokeCard poke={c} size={52}/>
+                        <div style={{ color:GB.lightest, fontSize:8, fontWeight:'bold' }}>{c.name}</div>
+                        <div style={{ color:GB.accent, fontSize:8 }}>+{c.bst-evoPhase.poke.bst}</div>
+                      </button>
+                    ))}
+                  </div>
+                  <button style={sBtnSm} onClick={skipEvo}>SKIP →</button>
+                </>
+              ) : (
+                <>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:12, marginBottom:8 }}>
+                    <div style={{ textAlign:'center' }}><PokeCard poke={evoPhase.poke} size={64}/><div style={{ color:GB.textDim, fontSize:9, marginTop:2 }}>{evoPhase.poke.name}</div></div>
+                    <span style={{ color:GB.accent, fontSize:18 }}>→</span>
+                    <div style={{ textAlign:'center' }}><PokeCard poke={evoPhase.evo} size={64}/><div style={{ color:GB.text, fontSize:9, fontWeight:'bold', marginTop:2 }}>{evoPhase.evo.name}</div></div>
+                  </div>
+                  <div style={{ color:GB.accent, fontSize:10, marginBottom:8 }}>BST +{evoPhase.evo.bst-evoPhase.poke.bst}</div>
+                  <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
+                    <button style={{...sBtnSm, background:GB.accent, color:GB.darkest}} onClick={()=>acceptEvo()}>EVOLVE ★</button>
+                    <button style={sBtnSm} onClick={skipEvo}>SKIP →</button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1163,7 +1219,8 @@ export default function App() {
                   <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:4 }}>
                     {current.types.map(t=><span key={t} style={{ background:GB.mid, color:GB.lightest, fontSize:9, padding:'2px 5px', border:`1px solid ${GB.dim}` }}>{t}</span>)}
                   </div>
-                  {current.evolvesTo&&DEX_MAP[current.evolvesTo]&&!usedEvo&&<div style={{ color:GB.dim, fontSize:9, marginTop:2 }}>→ {DEX_MAP[current.evolvesTo][0]}</div>}
+                  {current.dex===EEVEE_DEX&&!usedEvo&&<div style={{ color:GB.dim, fontSize:9, marginTop:2 }}>→ choose evolution</div>}
+                  {current.dex!==EEVEE_DEX&&current.evolvesTo&&DEX_MAP[current.evolvesTo]&&!usedEvo&&<div style={{ color:GB.dim, fontSize:9, marginTop:2 }}>→ {DEX_MAP[current.evolvesTo][0]}</div>}
                 </div>
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:8 }}>
@@ -1187,6 +1244,7 @@ export default function App() {
     const badgesWon = isChamp?12:result.defeated;
     return (
       <div style={sWrap}>
+        {musicToggle}
         {toast.length>0&&<AchievementToast achievements={toast} onDismiss={()=>setToast([])}/>}
 
         {keepModal&&(
