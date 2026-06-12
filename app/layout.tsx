@@ -4,7 +4,7 @@ import { Geist, Geist_Mono, Press_Start_2P } from 'next/font/google'
 import Script from 'next/script'
 import './globals.css'
 
-const adsenseClient = process.env.NEXT_PUBLIC_ADSENSE_CLIENT
+const adsenseClient = process.env.NEXT_PUBLIC_ADSENSE_CLIENT ?? 'ca-pub-5796004440424134'
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
 const geistMono = Geist_Mono({
