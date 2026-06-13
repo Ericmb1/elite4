@@ -4,7 +4,7 @@ import { Geist, Geist_Mono, Press_Start_2P } from 'next/font/google'
 import Script from 'next/script'
 import './globals.css'
 
-const adsenseClient = 'ca-pub-5796004440424134'
+const adsenseClient = process.env.NEXT_PUBLIC_ADSENSE_CLIENT ?? 'ca-pub-5796004440424134'
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
 const geistMono = Geist_Mono({
@@ -48,15 +48,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable}`}>
-      <body className="font-sans antialiased bg-background text-foreground">
+      <head>
         {adsenseClient && (
           <Script
             async
             src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
             crossOrigin="anonymous"
-            strategy="afterInteractive"
+            strategy="beforeInteractive"
           />
         )}
+      </head>
+      <body className="font-sans antialiased bg-background text-foreground">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
