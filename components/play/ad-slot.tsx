@@ -9,7 +9,7 @@ declare global {
   }
 }
 
-const ADSENSE_CLIENT = process.env.NEXT_PUBLIC_ADSENSE_CLIENT
+const ADSENSE_CLIENT = "ca-pub-5796004440424134"
 
 /**
  * Renders a Google AdSense unit when configured, otherwise a styled placeholder.
